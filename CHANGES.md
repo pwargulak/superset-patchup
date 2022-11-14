@@ -1,3 +1,5 @@
+v0.4.1
+- adapted for OpenLMIS OAuth
 
 v0.4.0 Thu Aug  4 02:09:35 PM EAT 2022
 -  https://github.com/onaio/superset-patchup/pull/63 Allow onadata provider name to be configurable.
