@@ -10,7 +10,7 @@ This can be done this way:
 
 ```sh
 # to install version 0.1.0
-pip install git+https://github.com/onaio/superset-patchup.git@v0.1.0  
+pip install git+https://github.com/onaio/superset-patchup.git@v0.1.0
 ```
 
 Once installed, you would need to modify the `superset_config.py` to configure Superset using Superset-patchup.
@@ -27,6 +27,8 @@ To configure this, you would add the following to your `superset_config.py` file
 
 ```python
 # superset_config.py
+from flask_appbuilder.security.manager import AUTH_OAUTH
+
 from superset_patchup.oauth import CustomSecurityManager
 
 
@@ -36,14 +38,14 @@ OAUTH_PROVIDERS = [
 {
     'name': 'onadata',
     'icon': 'fa-rebel',
-        'token_key': 'access_token',
-        'remote_app': {
-            'consumer_key': 'consumer key goes here',
-            'consumer_secret': 'consumer secret goes here'
-            'base_url': 'https://stage-api.ona.io/',
-            'access_token_url': 'https://stage-api.ona.io/o/token/',
-            'authorize_url': 'https://stage-api.ona.io/o/authorize/'
-        }
+    'token_key': 'access_token',
+    'remote_app': {
+        'client_id': 'consumer key goes here',
+        'client_secret': 'consumer secret goes here',
+        'api_base_url': 'https://stage-api.ona.io/',
+        'access_token_url': 'https://stage-api.ona.io/o/token/',
+        'authorize_url': 'https://stage-api.ona.io/o/authorize/'
+    }
 }
 ]
 # end of standard Superset oAuth settings
@@ -58,6 +60,8 @@ To configure this, you would add the following to your `superset_config.py` file
 
 ```python
 # superset_config.py
+from flask_appbuilder.security.manager import AUTH_OAUTH
+
 from superset_patchup.oauth import CustomSecurityManager
 
 
@@ -69,9 +73,9 @@ OAUTH_PROVIDERS = [
     'icon': 'fa-eercast',
         'token_key': 'access_token',
         'remote_app': {
-            'consumer_key': 'consumer key goes here',
-            'consumer_secret': 'consumer secret goes here'
-            'base_url': 'https://stage-api.ona.io/',
+            'client_id': 'consumer key goes here',
+            'client_secret': 'consumer secret goes here'
+            'api_base_url': 'https://stage-api.ona.io/',
             'access_token_url': 'https://stage-api.ona.io/o/token/',
             'authorize_url': 'https://stage-api.ona.io/o/authorize/',
             # the redirect url is set below, it needs to be on the same domain as superset
@@ -137,7 +141,7 @@ PATCHUP_EMAIL_BASE = "ketchup@example.com"
 With this in place, Superset-patchup will assign each user an email in the form of `ketchup+USERNAME@example.com`.  So, for example, if a user named `bobbie` signed in, his email would be set as `ketchup+bobbie@example.com`.
 
 ### Dashboards list endpoint
-There are cases where you simply want a list of all the dashboards that are available to a user. This could be to display in a separate website or to help in making some other decision like for example what permissions to grant a user, or what tasks can be assigned to a user based on what dashboards they have access to. With the SupersetKetchupApiView, ketchup exposes a new endpoint `all_dashboards` which uses superset's DashboardFilter to return a list of all the dashboards that the user has access to.
+There are cases where you simply want a list of all the dashboards that are available to a user. This could be to display in a separate website or to help in making some other decision like for example what permissions to grant a user, or what tasks can be assigned to a user based on what dashboards they have access to. With the SupersetKetchupApiView, ketchup exposes a new endpoint `all_dashboards` which uses superset's DashboardAccessFilter to return a list of all the dashboards that the user has access to.
 
 To get the dashboard list you would need to make a `GET` request to `/superset-ketchup/api/all_dashboards/` and the response will be something like
 

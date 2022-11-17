@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Test helpers to create and manage fixtures for our Superset app
 """
@@ -7,35 +8,44 @@ import uuid
 import superset
 
 from superset.connectors.sqla.models import SqlaTable
-from superset.models.core import (Slice, Dashboard)
+from superset.models.core import Database
+from superset.models.dashboard import Dashboard
+from superset.models.slice import Slice
+
 
 # Inspired by:
 # https://github.com/apache/incubator-superset/blob/0.27/tests/import_export_tests.py
-# ... but sadly these aren't packaged for our re-use.  Also they're weird in places.
-
-def create_table(name=None, database_name='main', schema='', tags=['test']):
+# ... but sadly these aren't packaged for our re-use.
+# Also they're weird in places.
+def create_table(name=None, database_name="main", schema="", tags=None):
 
     """Create a new test table (by default in the 'main' db)"""
 
     if name is None:
         name = "table-%s" % uuid.uuid4()
 
+    if tags is None:
+        tags = ["test"]
+    db = superset.db.session.query(Database).first()
+
     table = SqlaTable(
+        database_id=db.id,
         table_name=name,
         #
         schema=schema,
-        params=json.dumps(dict(
-            tags=tags,
-            database_name=database_name,
-        )),
+        params=json.dumps(
+            dict(
+                tags=tags,
+                database_name=database_name,
+            )
+        ),
     )
+    superset.db.session.add(table)
 
-    # Return imported obj
-    return superset.db.session.query(SqlaTable).filter_by(
-        id=SqlaTable.import_obj(table)).first()
+    return superset.db.session.query(SqlaTable).filter_by(table_name=name).first()
 
 
-def new_slice(name=None, table=None, tags=['test']):
+def new_slice(name=None, table=None, tags=None):
 
     """Create a new test slice (and test table if none specified)"""
 
@@ -45,18 +55,24 @@ def new_slice(name=None, table=None, tags=['test']):
     if table is None:
         table = create_table(tags=tags)
 
+    if tags is None:
+        tags = ["test"]
+
     slyce = Slice(
         slice_name=name,
-        datasource_type='table',
+        datasource_type="table",
         datasource_name=table.datasource_name,
-        viz_type='bubble',
-        params=json.dumps(dict(
-            tags=tags,
-            database_name=table.database_name,
-            datasource_name=table.datasource_name,
-            schema=table.schema,
-            metrics=[],
-        )),
+        viz_type="bubble",
+        params=json.dumps(
+            dict(
+                tags=tags,
+                database_name=table.database_name,
+                datasource_name=table.datasource_name,
+                schema=table.schema,
+                metrics=[],
+            )
+        ),
+        perm=table.perm,
     )
 
     # NOTE that we don't actually import the slice here - it needs to
@@ -64,9 +80,12 @@ def new_slice(name=None, table=None, tags=['test']):
     return slyce
 
 
-def create_dashboard(title=None, slices=None, tags=['test']):
+def create_dashboard(title=None, slices=None, tags=None):
 
     """Create a new test dashboard (and slice and table if needed)"""
+
+    if tags is None:
+        tags = ["test"]
 
     if title is None:
         title = "dashboard-%s" % uuid.uuid4()
@@ -82,41 +101,54 @@ def create_dashboard(title=None, slices=None, tags=['test']):
         json_metadata=json.dumps(dict(tags=tags)),
     )
 
+    superset.db.session.add(dashboard)
+
     # Return imported obj
-    return superset.db.session.query(Dashboard).filter_by(
-        id=Dashboard.import_obj(dashboard)).first()
+    dashboard = (
+        superset.db.session.query(Dashboard).filter_by(slug=dashboard.slug).first()
+    )
+    dashboard.published = True
+    superset.db.session.merge(dashboard)
+    superset.db.session.commit()
+
+    return dashboard
 
 
-def cleanup_data(tags=['test']):
+def cleanup_data(tags=None):
+    """Cleanup Dashboard, Slice, and SqlaTable objects."""
+
     cleanup_objs(Dashboard, tags)
     cleanup_objs(Slice, tags)
     cleanup_objs(SqlaTable, tags)
 
 
-def cleanup_objs(model, tags=['test']):
+def cleanup_objs(model, tags=None):
 
     """
     Delete datas that are tagged with certain things
     TODO: Think about tracking with a fixture obj instead, cleaner?
     """
 
-    import celery
-    logger = celery.utils.log.get_task_logger(__name__)
+    if tags is None:
+        tags = ["test"]
 
     tags = set(tags)
     for obj in superset.db.session.query(model):
-        obj_tags = getattr(obj, 'params_dict', {}).get('tags', [])
+        obj_tags = getattr(obj, "params_dict", {}).get("tags", [])
         if tags.isdisjoint(obj_tags):
             continue
         superset.db.session.delete(obj)
     superset.db.session.commit()
 
-def grant_db_access_to_role(role, db):
-    return grant_obj_permission_to_role(role, db, 'database_access')
+
+def grant_db_access_to_role(role, db):  # pylint: disable=invalid-name
+    """Grant the role 'database_name', returns grant permission."""
+    return grant_obj_permission_to_role(role, db, "database_access")
 
 
 def grant_slice_access_to_role(role, slyce):
-    return grant_obj_permission_to_role(role, slyce, 'datasource_access')
+    """Grant the role 'datasource_access', returns grant permission."""
+    return grant_obj_permission_to_role(role, slyce, "datasource_access")
 
 
 def grant_obj_permission_to_role(role, obj, permission):
@@ -126,7 +158,7 @@ def grant_obj_permission_to_role(role, obj, permission):
     to a role.
     """
 
-    superset.security_manager.merge_perm(permission, obj.perm)
+    superset.security_manager.add_permission_view_menu(permission, obj.perm)
     superset.security_manager.get_session.commit()
 
     # DRAGONS: This is super-confusing naming, having permission to access
@@ -140,6 +172,7 @@ def grant_obj_permission_to_role(role, obj, permission):
 
     return grant
 
+
 def grant_api_permission_to_role(role, api_clazz, api_method):
 
     """
@@ -148,14 +181,16 @@ def grant_api_permission_to_role(role, api_clazz, api_method):
     """
 
     grant = superset.security_manager.find_permission_view_menu(
-        view_menu_name=api_clazz.name,
-        permission_name="can_%s%" % api_method,
+        view_menu_name=api_clazz.__name__,
+        permission_name="can_%s" % api_method,
     )
 
     role.permissions.append(grant)
     superset.security_manager.get_session.commit()
 
+
 def add_owner_to_dashboard(dashboard, user):
+    """Add's user as an owner to the dashboard object."""
     dashboard.owners.append(user)
     superset.db.session.merge(dashboard)
     superset.db.session.commit()
