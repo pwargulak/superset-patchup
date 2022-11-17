@@ -1,3 +1,5 @@
+v0.5.0 
+- OpenLMIS Version release, support for Superset 1.5.2, security fix
 
 v0.4.0 Thu Aug  4 02:09:35 PM EAT 2022
 -  https://github.com/onaio/superset-patchup/pull/63 Allow onadata provider name to be configurable.
