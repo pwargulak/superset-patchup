@@ -2,13 +2,21 @@
 import logging
 import re
 
-from flask import abort, flash, g, redirect, request, session, url_for, \
-    jsonify, make_response
+from flask import (
+    abort,
+    flash,
+    g,
+    redirect,
+    request,
+    session,
+    url_for,
+    jsonify,
+    make_response,
+)
 
 from flask_appbuilder._compat import as_unicode
 from flask_appbuilder.security.sqla import models as ab_models
-from flask_appbuilder.security.views import \
-    AuthOAuthView as SupersetAuthOAuthView
+from flask_appbuilder.security.views import AuthOAuthView as SupersetAuthOAuthView
 from flask_appbuilder.security.views import expose
 
 from superset.security import SupersetSecurityManager
@@ -20,7 +28,8 @@ from superset_patchup.utils import is_safe_url, is_valid_provider
 
 
 class AuthOAuthView(SupersetAuthOAuthView):
-    """ Flask-AppBuilder's Authentication OAuth view"""
+    """Flask-AppBuilder's Authentication OAuth view"""
+
     login_template = "appbuilder/general/security/login_oauth.html"
 
     @expose("/login/")
@@ -33,8 +42,8 @@ class AuthOAuthView(SupersetAuthOAuthView):
 
         # handle redirect
         redirect_url = self.appbuilder.get_url_for_index
-        if request.args.get('redirect_url') is not None:
-            redirect_url = request.args.get('redirect_url')
+        if request.args.get("redirect_url") is not None:
+            redirect_url = request.args.get("redirect_url")
             if not is_safe_url(redirect_url):
                 return abort(400)
 
@@ -52,25 +61,25 @@ class AuthOAuthView(SupersetAuthOAuthView):
         logging.debug(f"Going to call authorize for: {provider}")
         state = self.generate_state()
         try:
+            scheme = self.appbuilder.app.config.get("PREFERRED_URL_SCHEME", "https")
             if register:
                 logging.debug("Login to Register")
                 session["register"] = True
             if provider == "twitter":
-                return self.appbuilder.sm.oauth_remotes[provider].authorize(
-                    callback=url_for(
+                return self.appbuilder.sm.oauth_remotes[provider].authorize_redirect(
+                    redirect_uri=url_for(
                         ".oauth_authorized",
                         provider=provider,
                         _external=True,
+                        _scheme=scheme,
                         state=state,
                     )
                 )
-            return self.appbuilder.sm.oauth_remotes[provider].authorize(
-                callback=url_for(
-                    ".oauth_authorized",
-                    provider=provider,
-                    _external=True
-                ),
-                state=state,
+            callback = url_for(
+                ".oauth_authorized", provider=provider, _external=True, _scheme=scheme
+            )
+            return self.appbuilder.sm.oauth_remotes[provider].authorize_redirect(
+                redirect_uri=callback,
             )
         except Exception as err:  # pylint: disable=broad-except
             logging.error(f"Error on OAuth authorize: {err}")
@@ -86,29 +95,27 @@ class AuthOAuthView(SupersetAuthOAuthView):
         logging.debug("Provider: %s", provider)
 
         if g.user is not None and g.user.is_authenticated:
-            logging.debug("Provider %s is already authorized by %s",
-                          provider, g.user)
-            return make_response(jsonify(
-                isAuthorized=True
-            ))
+            logging.debug("Provider %s is already authorized by %s", provider, g.user)
+            return make_response(jsonify(isAuthorized=True))
 
         redirect_url = request.args.get("redirect_url")
         if not redirect_url or not is_safe_url(redirect_url):
             logging.debug("The arg redirect_url not found or not safe")
             return abort(400)
 
-        logging.debug("Initialization of authorization process for: %s",
-                      provider)
+        logging.debug("Initialization of authorization process for: %s", provider)
 
         # libraries assume that
         # 'redirect_url' should be available in the session
-        session['%s_oauthredir' % provider] = redirect_url
+        session[f"{provider}_oauthredir"] = redirect_url
 
         state = self.generate_state()
-        return make_response(jsonify(
-            isAuthorized=False,
-            state=state
-        ))
+
+        # Newest version of Superset for OpenLMIS
+        session[f"_{provider}_authlib_state_"] = state
+        session[f"_{provider}_authlib_redirect_uri_"] = redirect_url
+
+        return make_response(jsonify(isAuthorized=False, state=state))
 
     @expose("/oauth-authorized/<provider>")
     # pylint: disable=too-many-branches
@@ -117,12 +124,14 @@ class AuthOAuthView(SupersetAuthOAuthView):
         """View that a user is redirected to from the Oauth server"""
 
         logging.debug("Authorized init")
-        resp = self.appbuilder.sm.oauth_remotes[provider].authorized_response()
         if "Custom-Api-Token" in request.headers:
+            logging.debug("Custom-Api-Token is present")
             resp = {"access_token": request.headers.get("Custom-Api-Token")}
+        else:
+            resp = self.appbuilder.sm.oauth_remotes[provider].authorize_access_token()
         if resp is None:
             flash("You denied the request to sign in.", "warning")
-            return redirect("login")
+            return redirect("/login")
 
         logging.debug(f"OAUTH Authorized resp: {resp}")
 
@@ -145,14 +154,14 @@ class AuthOAuthView(SupersetAuthOAuthView):
                         break
                 if not allow:
                     flash("You are not authorized.", "warning")
-                    return redirect("login")
+                    return redirect("/login")
             else:
                 logging.debug("No whitelist for OAuth provider")
             user = self.appbuilder.sm.auth_user_oauth(userinfo)
 
         if user is None:
             flash(as_unicode(self.invalid_login_message), "warning")
-            return redirect("login")
+            return redirect("/login")
         login_user(user)
 
         # handle custom redirection
@@ -199,16 +208,17 @@ class CustomSecurityManager(SupersetSecurityManager):
         Checks if the permission should be granted or not for the custom role
         returns a boolean value
         """
-        return not (self.is_user_defined_permission(pvm)
-                    or self.is_admin_only(pvm) or self.is_alpha_only(pvm)) or (
-                        self.is_custom_defined_permission(pvm, role_perms))
+        return not (
+            self._is_user_defined_permission(pvm)
+            or self._is_admin_only(pvm)
+            or self._is_alpha_only(pvm)
+        ) or (self.is_custom_defined_permission(pvm, role_perms))
 
     def set_custom_role(self, role_name, pvm_check, role_perms):
         """
         Assign permissions to a role
         """
-        # pylint: disable=logging-format-interpolation
-        logging.info("Syncing {} perms".format(role_name))
+        logging.info("Syncing %s perms", role_name)
         sesh = self.get_session
         pvms = sesh.query(ab_models.PermissionView).all()
         pvms = [p for p in pvms if p.permission and p.view_menu]
@@ -224,7 +234,7 @@ class CustomSecurityManager(SupersetSecurityManager):
 
         # dirty hack.  We need to load the app from here because at the top
         # of the file superset is not yet initialized with an app property
-        from superset import app
+        from superset import app  # pylint: disable=import-outside-toplevel
 
         add_custom_roles = app.config.get("ADD_CUSTOM_ROLES", False)
         custom_roles = app.config.get("CUSTOM_ROLES", {})
@@ -259,7 +269,7 @@ class CustomSecurityManager(SupersetSecurityManager):
 
         # dirty hack.  We need to load the app from here because at the top
         # of the file superset is not yet initialized with an app property
-        from superset import app
+        from superset import app  # pylint: disable=import-outside-toplevel
 
         # this is used for provider's whose users do not have an email address
         # superset requires an email address and so we need to provide it
@@ -269,12 +279,19 @@ class CustomSecurityManager(SupersetSecurityManager):
         # above)
         email_base = app.config.get("PATCHUP_EMAIL_BASE")
 
-        if is_valid_provider(provider, "onadata"):
-            user = (self.appbuilder.sm.oauth_remotes[provider].get(
-                "api/v1/user.json").data)
+        onadata_provider = app.config.get("ONADATA_PROVIDER_NAME", "onadata")
+        if is_valid_provider(provider, onadata_provider):
+            user = (
+                self.appbuilder.sm.oauth_remotes[provider]
+                .get("api/v1/user.json", token=response)
+                .json()
+            )
 
-            user_data = (self.appbuilder.sm.oauth_remotes[provider].get(
-                f"api/v1/profiles/{user['username']}.json").data)
+            user_data = (
+                self.appbuilder.sm.oauth_remotes[provider]
+                .get(f"api/v1/profiles/{user['username']}.json", token=response)
+                .json()
+            )
 
             return {
                 "name": user_data["name"],
@@ -286,9 +303,13 @@ class CustomSecurityManager(SupersetSecurityManager):
             }
 
         if is_valid_provider(provider, "OpenSRP"):
-            user_object = (self.appbuilder.sm.oauth_remotes[provider].get(
-                "user-details").data)
-            username = user_object["userName"]
+            user_object = (
+                self.appbuilder.sm.oauth_remotes[provider]
+                .get("user-details", token=response)
+                .json()
+            )
+
+            username = user_object.get("username") or user_object.get("userName")
 
             result = {"username": username}
 
@@ -306,16 +327,23 @@ class CustomSecurityManager(SupersetSecurityManager):
             my_token = self.oauth_tokengetter()[0]
             # get referenceDataUserId
             reference_user = self.appbuilder.sm.oauth_remotes[provider].post(
-                "oauth/check_token", data={"token": my_token})
-            reference_data_user_id = reference_user.data["referenceDataUserId"]
+                "oauth/check_token", data={"token": my_token}
+            )
+            reference_data_user_id = reference_user.json()["referenceDataUserId"]
             # get user details
             endpoint = f"users/{reference_data_user_id}"
-            user_data = self.appbuilder.sm.oauth_remotes[provider].get(
-                endpoint).data
+            user_data = (
+                self.appbuilder.sm.oauth_remotes[provider]
+                .get(endpoint, token=response)
+                .json()
+            )
             # get email
             email_endpoint = f"userContactDetails/{reference_data_user_id}"
-            email = self.appbuilder.sm.oauth_remotes[provider].get(
-                email_endpoint).data
+            email = (
+                self.appbuilder.sm.oauth_remotes[provider]
+                .get(email_endpoint, token=response)
+                .json()
+            )
             return {
                 "name": user_data["username"],
                 "email": email["emailDetails"]["email"],
