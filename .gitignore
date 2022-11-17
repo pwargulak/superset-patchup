@@ -112,3 +112,6 @@ tests/.superset/
 # Sublime
 *.sublime-project
 *.sublime-workspace
+
+# Idea
+.idea
