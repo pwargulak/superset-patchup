@@ -1,3 +1,6 @@
+v0.5.1
+- Fixed CRSF token generation
+
 v0.5.0 
 - OpenLMIS Version release, support for Superset 1.5.2, security fix
 

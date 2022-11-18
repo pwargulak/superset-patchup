@@ -3,8 +3,7 @@ import logging
 import re
 import json
 import time
-import secrets
-import base64
+import random
 
 from flask import (
     abort,
@@ -35,7 +34,6 @@ class AuthOAuthView(SupersetAuthOAuthView):
     """Flask-AppBuilder's Authentication OAuth view"""
 
     state_expires_in = 3600
-    state_token_length = 64
     login_template = "appbuilder/general/security/login_oauth.html"
 
     @expose("/login/")
@@ -122,9 +120,8 @@ class AuthOAuthView(SupersetAuthOAuthView):
         session[f"_{provider}_authlib_redirect_uri_"] = redirect_url
         # For Authlib 1.1.0 (Superset 1.5.2)
         now = time.time()
-        state_str = state.decode("utf-8")
         state_data = {"state": state, "redirect_uri": redirect_url}
-        session[f"_state_{provider}_{state_str}"] = {"data": state_data, "exp": now + self.state_expires_in}
+        session[f"_state_{provider}_{state}"] = {"data": state_data, "exp": now + self.state_expires_in}
 
         return make_response(jsonify(isAuthorized=False, state=state))
 
@@ -133,8 +130,6 @@ class AuthOAuthView(SupersetAuthOAuthView):
     # pylint: disable=logging-fstring-interpolation
     def oauth_authorized(self, provider):
         """View that a user is redirected to from the Oauth server"""
-
-        logging.info(session)
 
         logging.debug("Authorized init")
         if "Custom-Api-Token" in request.headers:
@@ -197,7 +192,7 @@ class AuthOAuthView(SupersetAuthOAuthView):
         """
         Generates random state for protection from Cross-site Request Forgery attacks
         """
-        return base64.b64encode(secrets.token_bytes(self.state_token_length))
+        return '%064x' % random.randrange(16**64)
 
 
 class CustomSecurityManager(SupersetSecurityManager):
